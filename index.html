@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Design Canvas</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/interact.js/1.10.17/interact.min.js"></script>
+    <link rel="stylesheet" href="alvin.css">
+</head>
+<body>
+    <div class="sidebar">
+        <h2>Add Elements</h2>
+        <form class="upload-form" id="uploadForm">
+            <input type="file" accept="image/*" id="imageInput" required>
+            <textarea id="description" placeholder="Enter description..." required></textarea>
+            <button type="submit">Add to Canvas</button>
+        </form>
+    </div>
+    <div class="canvas-container" id="canvasContainer">
+        <div class="canvas" id="canvas"></div>
+        <div class="nav-controls">
+            <button class="nav-button" id="centerButton">Center View</button>
+            <div class="zoom-level" id="zoomLevel">100%</div>
+        </div>
+    </div>
+
+    <script>
+        let elementCounter = 0;
+        let currentZIndex = 1;
+        let currentScale = 1;
+        let isPanning = false;
+        let currentTranslateX = -4000;
+        let currentTranslateY = -4000;
+        let velocityX = 0;
+        let velocityY = 0;
+        let animationFrameId = null;
+
+        const canvasContainer = document.getElementById('canvasContainer');
+        const canvas = document.getElementById('canvas');
+        const zoomLevelDisplay = document.getElementById('zoomLevel');
+
+        function updateTransform() {
+            canvas.style.transform = `translate(${currentTranslateX}px, ${currentTranslateY}px) scale(${currentScale})`;
+            zoomLevelDisplay.textContent = `${Math.round(currentScale * 100)}%`;
+        }
+        updateTransform();
+
+        document.getElementById('uploadForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+            
+            const fileInput = document.getElementById('imageInput');
+            const description = document.getElementById('description').value;
+            
+            if (fileInput.files && fileInput.files[0]) {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    addElement(e.target.result, description);
+                };
+                reader.readAsDataURL(fileInput.files[0]);
+            }
+            
+            this.reset();
+        });
+
+        document.getElementById('centerButton').addEventListener('click', () => {
+            currentTranslateX = -4000;
+            currentTranslateY = -4000;
+            currentScale = 1;
+            velocityX = 0;
+            velocityY = 0;
+            if (animationFrameId) {
+                cancelAnimationFrame(animationFrameId);
+            }
+            updateTransform();
+        });
+
+        canvasContainer.addEventListener('wheel', function(e) {
+            e.preventDefault();
+            
+            if (animationFrameId) {
+                cancelAnimationFrame(animationFrameId);
+            }
+
+            if (e.ctrlKey) {
+                const delta = -e.deltaY;
+                const zoomFactor = 0.005;
+                const newScale = currentScale * (1 + (delta * zoomFactor));
+                
+                if (newScale >= 0.1 && newScale <= 5) {
+                    const rect = canvasContainer.getBoundingClientRect();
+                    const mouseX = e.clientX - rect.left;
+                    const mouseY = e.clientY - rect.top;
+
+                    const scaleChange = newScale - currentScale;
+                    currentTranslateX -= ((mouseX - currentTranslateX) * scaleChange) / currentScale;
+                    currentTranslateY -= ((mouseY - currentTranslateY) * scaleChange) / currentScale;
+                    
+                    currentScale = newScale;
+                    updateTransform();
+                }
+            } else {
+                const deltaX = e.deltaX;
+                const deltaY = e.deltaY;
+                
+                const speedAdjustment = Math.max(0.2, currentScale * 0.5);
+                
+                velocityX = -deltaX * speedAdjustment;
+                velocityY = -deltaY * speedAdjustment;
+                
+                currentTranslateX += (-deltaX * speedAdjustment) / currentScale;
+                currentTranslateY += (-deltaY * speedAdjustment) / currentScale;
+                
+                const maxPan = 8000 / currentScale;
+                currentTranslateX = Math.max(Math.min(0, currentTranslateX), -maxPan);
+                currentTranslateY = Math.max(Math.min(0, currentTranslateY), -maxPan);
+                
+                updateTransform();
+                
+                if (!isPanning) {
+                    isPanning = true;
+                    canvasContainer.classList.add('is-panning');
+                }
+                
+                clearTimeout(this.panTimeout);
+                this.panTimeout = setTimeout(() => {
+                    isPanning = false;
+                    canvasContainer.classList.remove('is-panning');
+                }, 150);
+
+                updatePanWithInertia();
+            }
+        }, { passive: false });
+
+        // Modified inertia function with adjusted speed
+        function updatePanWithInertia() {
+            if (Math.abs(velocityX) > 0.1 || Math.abs(velocityY) > 0.1) {
+                // Adjust deceleration based on zoom level
+                const decelerationRate = Math.max(0.93, 0.95 * currentScale);
+                
+                velocityX *= decelerationRate;
+                velocityY *= decelerationRate;
+                
+                const speedAdjustment = Math.max(0.2, currentScale * 0.5);
+                currentTranslateX += (velocityX * speedAdjustment) / currentScale;
+                currentTranslateY += (velocityY * speedAdjustment) / currentScale;
+                
+                const maxPan = 8000 / currentScale;
+                currentTranslateX = Math.max(Math.min(0, currentTranslateX), -maxPan);
+                currentTranslateY = Math.max(Math.min(0, currentTranslateY), -maxPan);
+                
+                updateTransform();
+                animationFrameId = requestAnimationFrame(updatePanWithInertia);
+            }
+        }
+        
+        function addElement(imageSrc, description) {
+            const element = document.createElement('div');
+            element.className = 'element';
+            element.innerHTML = `
+                <button class="delete-button" title="Delete">×</button>
+                <div class="image-container">
+                    <img src="${imageSrc}" alt="Uploaded image">
+                </div>
+                <p>${description}</p>
+                <div class="resize-handle"></div>
+            `;
+            
+            element.style.left = `${(-currentTranslateX + canvasContainer.clientWidth/2/currentScale - 150 + (elementCounter * 20))}px`;
+            element.style.top = `${(-currentTranslateY + canvasContainer.clientHeight/2/currentScale - 100 + (elementCounter * 20))}px`;
+            element.style.zIndex = currentZIndex++;
+            elementCounter++;
+            
+            const deleteButton = element.querySelector('.delete-button');
+            deleteButton.addEventListener('click', () => {
+                element.remove();
+            });
+            
+            canvas.appendChild(element);
+            makeInteractive(element);
+        }
+
+        function makeInteractive(element) {
+            interact(element)
+                .draggable({
+                    inertia: true,
+                    modifiers: [
+                        interact.modifiers.restrictRect({
+                            restriction: 'parent',
+                            endOnly: true
+                        })
+                    ],
+                    listeners: {
+                        move: dragMoveListener,
+                        start: function(event) {
+                            event.target.style.zIndex = currentZIndex++;
+                            event.target.classList.add('is-dragging');
+                        },
+                        end: function(event) {
+                            event.target.classList.remove('is-dragging');
+                        }
+                    }
+                })
+                .resizable({
+                    edges: { right: true, bottom: true },
+                    listeners: {
+                        move: resizeListener,
+                        start: function(event) {
+                            event.target.style.zIndex = currentZIndex++;
+                        }
+                    },
+                    modifiers: [
+                        interact.modifiers.restrictSize({
+                            min: { width: 100, height: 100 }
+                        })
+                    ]
+                });
+
+            element.addEventListener('mousedown', function() {
+                this.style.zIndex = currentZIndex++;
+            });
+        }
+
+        function dragMoveListener(event) {
+            const target = event.target;
+            const x = (parseFloat(target.getAttribute('data-x')) || 0) + event.dx;
+            const y = (parseFloat(target.getAttribute('data-y')) || 0) + event.dy;
+
+            target.style.transform = `translate(${x}px, ${y}px)`;
+            target.setAttribute('data-x', x);
+            target.setAttribute('data-y', y);
+        }
+
+        function resizeListener(event) {
+            const target = event.target;
+            let x = (parseFloat(target.getAttribute('data-x')) || 0);
+            let y = (parseFloat(target.getAttribute('data-y')) || 0);
+
+            target.style.width = event.rect.width + 'px';
+            target.style.height = event.rect.height + 'px';
+
+            x += event.deltaRect.left;
+            y += event.deltaRect.top;
+
+            target.style.transform = `translate(${x}px, ${y}px)`;
+            target.setAttribute('data-x', x);
+            target.setAttribute('data-y', y);
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,571 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <meta charset="UTF-8">
+        <title>Design Canvas</title>
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/interact.js/1.10.17/interact.min.js"></script>
+        <!-- Add Google Fonts for handwritten style -->
+        <link href="https://fonts.googleapis.com/css2?family=Architects+Daughter&display=swap" rel="stylesheet">
+        <style>    
+        body {
+            margin: 0;
+            font-family: Arial, sans-serif;
+            height: 100vh;
+            display: grid;
+            grid-template-columns: 250px 1fr;
+            overflow: hidden;
+        }
+
+        .sidebar {
+            background: #f0f0f0;
+            padding: 20px;
+            border-right: 1px solid #ccc;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            z-index: 1000;
+            height: 100vh;
+            box-sizing: border-box;
+            overflow-y: auto;
+        }
+
+        .canvas-container {
+            position: relative;
+            overflow: hidden;
+            height: 100vh;
+            cursor: grab;
+        }
+
+        .canvas {
+            background: white;
+            position: absolute;
+            width: 10000px;
+            height: 10000px;
+            background-size: 20px 20px;
+            background-image: 
+                linear-gradient(to right, #f0f0f0 1px, transparent 1px),
+                linear-gradient(to bottom, #f0f0f0 1px, transparent 1px);
+            transform-origin: 0 0;
+        }
+
+        .element {
+            position: absolute;
+            background: white;
+            border: 1px solid #ccc;
+            padding: 10px;
+            cursor: move;
+            user-select: none;
+            width: 300px;
+            aspect-ratio: 3/4; /* Set initial aspect ratio */
+            box-sizing: border-box;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            display: flex;
+            flex-direction: column;
+        }
+
+        .element .image-container {
+            flex: 1;
+            position: relative;
+            overflow: hidden;
+            margin-bottom: 10px;
+        }
+
+        .element img {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            display: block;
+        }
+
+        .element p {
+            font-family: 'Architects Daughter', cursive;
+            margin: 0;
+            padding: 0;
+            line-height: 1.2;
+            overflow-y: auto;
+            font-size: calc(8px + 1.5vw); /* Dynamic font size */
+            max-height: 25%; /* Maximum height for text */
+            color: #333;
+            text-align: center;
+        }
+
+        .upload-form {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        textarea {
+            resize: vertical;
+            min-height: 60px;
+            padding: 8px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
+
+        input[type="file"] {
+            padding: 8px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            background: white;
+        }
+
+        button {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 8px 15px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+
+        button:hover {
+            background: #0056b3;
+        }
+
+        .resize-handle {
+            width: 10px;
+            height: 10px;
+            background-color: #007bff;
+            border-radius: 50%;
+            position: absolute;
+            right: -5px;
+            bottom: -5px;
+            cursor: se-resize;
+        }
+
+        .delete-button {
+            position: absolute;
+            top: -8px;
+            right: -8px;
+            width: 20px;
+            height: 20px;
+            background: #ff4444;
+            color: white;
+            border: none;
+            border-radius: 50%;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 14px;
+            line-height: 1;
+            z-index: 1;
+            padding: 0;
+        }
+
+        .delete-button:hover {
+            background: #cc0000;
+        }
+
+        .element.is-dragging {
+            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+        }
+
+        .canvas-container.is-panning {
+            cursor: grabbing;
+        }
+
+        .nav-controls {
+            position: absolute;
+            bottom: 20px;
+            left: 270px;
+            background: white;
+            padding: 10px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            z-index: 1000;
+            display: flex;
+            gap: 10px;
+        }
+
+        .nav-button {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 8px 15px;
+            border-radius: 4px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+
+        .zoom-level {
+            background: #f8f9fa;
+            padding: 8px 12px;
+            border-radius: 4px;
+            font-size: 14px;
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+    <div class="sidebar">
+        <h2>Add Elements</h2>
+        <form class="upload-form" id="uploadForm">
+            <input type="file" accept="image/*" id="imageInput" required>
+            <textarea id="description" placeholder="Enter description..." required></textarea>
+            <button type="submit">Add to Canvas</button>
+        </form>
+    </div>
+    <div class="canvas-container" id="canvasContainer">
+        <div class="canvas" id="canvas"></div>
+        <div class="nav-controls">
+            <button class="nav-button" id="centerButton">Center View</button>
+            <div class="zoom-level" id="zoomLevel">100%</div>
+        </div>
+    </div>
+
+    <script>
+        let elementCounter = 0;
+        let currentZIndex = 1;
+        let currentScale = 1;
+        let isPanning = false;
+        let currentTranslateX = -4000;
+        let currentTranslateY = -4000;
+        let velocityX = 0;
+        let velocityY = 0;
+        let animationFrameId = null;
+
+        const canvasContainer = document.getElementById('canvasContainer');
+        const canvas = document.getElementById('canvas');
+        const zoomLevelDisplay = document.getElementById('zoomLevel');
+
+        // Initialize transform
+        function updateTransform() {
+            canvas.style.transform = `translate(${currentTranslateX}px, ${currentTranslateY}px) scale(${currentScale})`;
+            zoomLevelDisplay.textContent = `${Math.round(currentScale * 100)}%`;
+        }
+        updateTransform();
+
+        // Form submission handler
+        document.getElementById('uploadForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+            
+            const fileInput = document.getElementById('imageInput');
+            const description = document.getElementById('description').value;
+            
+            if (fileInput.files && fileInput.files[0]) {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    addElement(e.target.result, description);
+                };
+                reader.readAsDataURL(fileInput.files[0]);
+            }
+            
+            this.reset();
+        });
+
+        // Center view button handler
+        document.getElementById('centerButton').addEventListener('click', () => {
+            currentTranslateX = -4000;
+            currentTranslateY = -4000;
+            currentScale = 1;
+            velocityX = 0;
+            velocityY = 0;
+            if (animationFrameId) {
+                cancelAnimationFrame(animationFrameId);
+            }
+            updateTransform();
+        });
+
+        canvasContainer.addEventListener('wheel', function(e) {
+            e.preventDefault();
+            
+            if (animationFrameId) {
+                cancelAnimationFrame(animationFrameId);
+            }
+
+            // Pinch-to-zoom gesture
+            if (e.ctrlKey) {
+                const delta = -e.deltaY;
+                const zoomFactor = 0.005;
+                const newScale = currentScale * (1 + (delta * zoomFactor));
+                
+                // Limit zoom level
+                if (newScale >= 0.1 && newScale <= 5) {
+                    // Calculate mouse position relative to canvas
+                    const rect = canvasContainer.getBoundingClientRect();
+                    const mouseX = e.clientX - rect.left;
+                    const mouseY = e.clientY - rect.top;
+
+                    // Calculate zoom center point
+                    const scaleChange = newScale - currentScale;
+                    currentTranslateX -= ((mouseX - currentTranslateX) * scaleChange) / currentScale;
+                    currentTranslateY -= ((mouseY - currentTranslateY) * scaleChange) / currentScale;
+                    
+                    currentScale = newScale;
+                    updateTransform();
+                }
+            } else {
+                // Regular panning with speed adjustment based on zoom level
+                const deltaX = e.deltaX;
+                const deltaY = e.deltaY;
+                
+                // Adjust speed based on zoom level - slower when zoomed out
+                const speedAdjustment = Math.max(0.2, currentScale * 0.5);
+                
+                velocityX = -deltaX * speedAdjustment;
+                velocityY = -deltaY * speedAdjustment;
+                
+                currentTranslateX += (-deltaX * speedAdjustment) / currentScale;
+                currentTranslateY += (-deltaY * speedAdjustment) / currentScale;
+                
+                // Boundary checks
+                const maxPan = 8000 / currentScale;
+                currentTranslateX = Math.max(Math.min(0, currentTranslateX), -maxPan);
+                currentTranslateY = Math.max(Math.min(0, currentTranslateY), -maxPan);
+                
+                updateTransform();
+                
+                if (!isPanning) {
+                    isPanning = true;
+                    canvasContainer.classList.add('is-panning');
+                }
+                
+                clearTimeout(this.panTimeout);
+                this.panTimeout = setTimeout(() => {
+                    isPanning = false;
+                    canvasContainer.classList.remove('is-panning');
+                }, 150);
+
+                updatePanWithInertia();
+            }
+        }, { passive: false });
+
+        // Modified inertia function with adjusted speed
+        function updatePanWithInertia() {
+            if (Math.abs(velocityX) > 0.1 || Math.abs(velocityY) > 0.1) {
+                // Adjust deceleration based on zoom level
+                const decelerationRate = Math.max(0.93, 0.95 * currentScale);
+                
+                velocityX *= decelerationRate;
+                velocityY *= decelerationRate;
+                
+                const speedAdjustment = Math.max(0.2, currentScale * 0.5);
+                currentTranslateX += (velocityX * speedAdjustment) / currentScale;
+                currentTranslateY += (velocityY * speedAdjustment) / currentScale;
+                
+                const maxPan = 8000 / currentScale;
+                currentTranslateX = Math.max(Math.min(0, currentTranslateX), -maxPan);
+                currentTranslateY = Math.max(Math.min(0, currentTranslateY), -maxPan);
+                
+                updateTransform();
+                animationFrameId = requestAnimationFrame(updatePanWithInertia);
+            }
+        }
+        
+        function addElement(imageSrc, description) {
+            const element = document.createElement('div');
+            element.className = 'element';
+            element.innerHTML = `
+                <button class="delete-button" title="Delete">×</button>
+                <div class="image-container">
+                    <img src="${imageSrc}" alt="Uploaded image">
+                </div>
+                <p>${description}</p>
+                <div class="resize-handle"></div>
+            `;
+            
+            element.style.left = `${(-currentTranslateX + canvasContainer.clientWidth/2/currentScale - 150 + (elementCounter * 20))}px`;
+            element.style.top = `${(-currentTranslateY + canvasContainer.clientHeight/2/currentScale - 100 + (elementCounter * 20))}px`;
+            element.style.zIndex = currentZIndex++;
+            elementCounter++;
+            
+            const deleteButton = element.querySelector('.delete-button');
+            deleteButton.addEventListener('click', () => {
+                element.remove();
+            });
+            
+            canvas.appendChild(element);
+            makeInteractive(element);
+        }
+
+        function makeInteractive(element) {
+        const initialAspectRatio = 3/4; // Match the CSS aspect-ratio
+
+        interact(element)
+            .draggable({
+                inertia: true,
+                modifiers: [
+                    interact.modifiers.restrictRect({
+                        restriction: 'parent',
+                        endOnly: true
+                    })
+                ],
+                listeners: {
+                    move: dragMoveListener,
+                    start: function(event) {
+                        event.target.style.zIndex = currentZIndex++;
+                        event.target.classList.add('is-dragging');
+                    },
+                    end: function(event) {
+                        event.target.classList.remove('is-dragging');
+                    }
+                }
+            })
+            .resizable({
+                edges: { right: true, bottom: true },
+                listeners: {
+                    move: function(event) {
+                        const target = event.target;
+                        let width = event.rect.width;
+                        let height = width * initialAspectRatio;
+
+                        // Update element size maintaining aspect ratio
+                        target.style.width = width + 'px';
+                        target.style.height = height + 'px';
+
+                        // Update position
+                        const x = (parseFloat(target.getAttribute('data-x')) || 0) + event.deltaRect.left;
+                        const y = (parseFloat(target.getAttribute('data-y')) || 0) + event.deltaRect.top;
+
+                        target.style.transform = `translate(${x}px, ${y}px)`;
+                        target.setAttribute('data-x', x);
+                        target.setAttribute('data-y', y);
+
+                        // Update text size based on element width
+                        const text = target.querySelector('p');
+                        if (text) {
+                            // Base font size on element width
+                            const baseFontSize = width * 0.04; // 4% of width
+                            const minFontSize = 12;
+                            const maxFontSize = 24;
+                            const fontSize = Math.min(Math.max(baseFontSize, minFontSize), maxFontSize);
+                            text.style.fontSize = `${fontSize}px`;
+                        }
+                    },
+                    start: function(event) {
+                        event.target.style.zIndex = currentZIndex++;
+                    }
+                },
+                modifiers: [
+                    interact.modifiers.restrictSize({
+                        min: { width: 100, height: 133 }, // Maintain aspect ratio in minimum size
+                        max: { width: 800, height: 1067 } // Maintain aspect ratio in maximum size
+                    }),
+                    interact.modifiers.aspectRatio({
+                        ratio: initialAspectRatio,
+                        modifiers: [
+                            interact.modifiers.restrictSize({
+                                max: 'parent'
+                            })
+                        ]
+                    })
+                ]
+            });
+
+        element.addEventListener('mousedown', function() {
+            this.style.zIndex = currentZIndex++;
+        });
+    }
+
+        function dragMoveListener(event) {
+            const target = event.target;
+            const x = (parseFloat(target.getAttribute('data-x')) || 0) + event.dx;
+            const y = (parseFloat(target.getAttribute('data-y')) || 0) + event.dy;
+
+            target.style.transform = `translate(${x}px, ${y}px)`;
+            target.setAttribute('data-x', x);
+            target.setAttribute('data-y', y);
+        }
+
+        function resizeListener(event) {
+            const target = event.target;
+            let x = (parseFloat(target.getAttribute('data-x')) || 0);
+            let y = (parseFloat(target.getAttribute('data-y')) || 0);
+
+            target.style.width = event.rect.width + 'px';
+            target.style.height = event.rect.height + 'px';
+
+            x += event.deltaRect.left;
+            y += event.deltaRect.top;
+
+            target.style.transform = `translate(${x}px, ${y}px)`;
+            target.setAttribute('data-x', x);
+            target.setAttribute('data-y', y);
+        }
+
+        function makeInteractive(element) {
+        const initialAspectRatio = 3/4; // Match the CSS aspect-ratio
+
+        interact(element)
+            .draggable({
+                inertia: true,
+                modifiers: [
+                    interact.modifiers.restrictRect({
+                        restriction: 'parent',
+                        endOnly: true
+                    })
+                ],
+                listeners: {
+                    move: dragMoveListener,
+                    start: function(event) {
+                        event.target.style.zIndex = currentZIndex++;
+                        event.target.classList.add('is-dragging');
+                    },
+                    end: function(event) {
+                        event.target.classList.remove('is-dragging');
+                    }
+                }
+            })
+            .resizable({
+                edges: { right: true, bottom: true },
+                listeners: {
+                    move: function(event) {
+                        const target = event.target;
+                        let width = event.rect.width;
+                        let height = width * initialAspectRatio;
+
+                        // Update element size maintaining aspect ratio
+                        target.style.width = width + 'px';
+                        target.style.height = height + 'px';
+
+                        // Update position
+                        const x = (parseFloat(target.getAttribute('data-x')) || 0) + event.deltaRect.left;
+                        const y = (parseFloat(target.getAttribute('data-y')) || 0) + event.deltaRect.top;
+
+                        target.style.transform = `translate(${x}px, ${y}px)`;
+                        target.setAttribute('data-x', x);
+                        target.setAttribute('data-y', y);
+
+                        // Update text size based on element width
+                        const text = target.querySelector('p');
+                        if (text) {
+                            // Base font size on element width
+                            const baseFontSize = width * 0.04; // 4% of width
+                            const minFontSize = 12;
+                            const maxFontSize = 24;
+                            const fontSize = Math.min(Math.max(baseFontSize, minFontSize), maxFontSize);
+                            text.style.fontSize = `${fontSize}px`;
+                        }
+                    },
+                    start: function(event) {
+                        event.target.style.zIndex = currentZIndex++;
+                    }
+                },
+                modifiers: [
+                    interact.modifiers.restrictSize({
+                        min: { width: 100, height: 133 }, // Maintain aspect ratio in minimum size
+                        max: { width: 800, height: 1067 } // Maintain aspect ratio in maximum size
+                    }),
+                    interact.modifiers.aspectRatio({
+                        ratio: initialAspectRatio,
+                        modifiers: [
+                            interact.modifiers.restrictSize({
+                                max: 'parent'
+                            })
+                        ]
+                    })
+                ]
+            });
+
+        element.addEventListener('mousedown', function() {
+            this.style.zIndex = currentZIndex++;
+        });
+    }
+    </script>
+</body>
+</html>
